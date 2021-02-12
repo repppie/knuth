@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <math.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -32,20 +33,22 @@ struct progress {
 	int cur;
 };
 
-#define	MAX_ITEMS 10000
-#define	MAX_LEVEL 50000
+#define	MAX_ITEMS 100000
+#define	MAX_LEVEL 500000
 
 struct item items[MAX_ITEMS];
 char *colors[MAX_ITEMS];
-struct node mem[500000];
+struct node mem[5000000];
 struct progress progress[MAX_LEVEL];
 struct timespec cur_time, start_time;
 int pos = 1;
 int nr_spacer;
 int nr_items;
 int nr_colors;
+int cutoff;
 int sol;
 int prog;
+int minimax;
 
 extern int optind;
 
@@ -120,6 +123,9 @@ unhide(int p)
 		x = mem[q].top;
 		u = mem[q].up;
 		d = mem[q].down;
+		/* See 7.2.2.1-84's solution. */
+		if (minimax && d > cutoff)
+			mem[q].down = d = x;
 		if (x <= 0)
 			q = d;
 		else {
@@ -162,7 +168,17 @@ hide(int p)
 static void
 uncover(int i)
 {
-	int l, p, r;
+	int cnt, l, p, r;
+
+	if (minimax) {
+		for (cnt = 0, p = mem[i].up; p >= cutoff; p = mem[p].up)
+			cnt++;
+		if (cnt) {
+			mem[i].up = p;
+			mem[p].down = i;
+			mem[i].len -= cnt;
+		}
+	}
 
 	l = items[i].prev;
 	r = items[i].next;
@@ -193,11 +209,21 @@ cover(int i)
 static void
 unpurify(int p)
 {
-	int c, i, q;
+	int c, cnt, i, pp, q;
 
 	c = mem[p].color;
 	i = mem[p].top;
 	mem[i].color = 0; /* XXX Knuth doesn't do this (on purpose) */
+
+	if (minimax) {
+		for (cnt = 0, pp = mem[i].up; pp >= cutoff; pp = mem[pp].up)
+			cnt++;
+		if (cnt) {
+			mem[i].up = pp;
+			mem[pp].down = i;
+			mem[i].len -= cnt;
+		}
+	}
 	for (q = mem[i].up; q != i; q = mem[q].up) {
 		if (mem[q].color < 0)
 			mem[q].color = c;
@@ -305,6 +331,33 @@ show_progress(unsigned long found, int l)
 }
 
 static void
+found_minimax_sol(int x[], int l)
+{
+	int cnt, i, j, max, top;
+
+	for (i = 0, max = 0; i < l; i++)
+		if (x[i] > max)
+			max = x[i];
+	while (mem[++max].top > 0);
+	if (max != cutoff) {
+		cutoff = max;
+
+		/* Remove all nodes > cutoff */
+		for (i = 0; i < l; i++) {
+			top = mem[x[i]].top;
+			for (cnt = 0, j = mem[top].up; j >= cutoff; j =
+			    mem[j].up)
+				cnt++;
+			if (cnt) {
+				mem[j].down = top;
+				mem[top].up = j;
+				mem[top].len -= cnt;
+			}
+		}
+	}
+}
+
+static void
 dlx(void)
 {
 	struct timespec last_time;
@@ -318,6 +371,8 @@ dlx(void)
 	cnt = found = l = 0;
 	while (1) {
 		if (items[0].prev == 0) {
+			if (minimax)
+				found_minimax_sol(x, l);
 			print_sol(x, l);
 			found++;
 			goto c8;
@@ -387,8 +442,12 @@ main(int argc, char **argv)
 	char *e, *end, *m, *s;
 	int ch, fd, i, it, last_primary, primary_done;
 
-	while ((ch = getopt(argc, argv, "ps")) != -1) {
+	while ((ch = getopt(argc, argv, "mps")) != -1) {
 		switch (ch) {
+		case 'm':
+			minimax = 1;
+			cutoff = INT_MAX;
+			break;
 		case 'p':
 			prog = 1;
 			break;
@@ -441,6 +500,8 @@ main(int argc, char **argv)
 	do {
 		s = m;
 		while (*m++ != '\n');
+		if (*s == '\n' || *s == '|')
+			continue;
 		*(m - 1) = '\0';
 		/* XXX detect duplicate options? */
 		while ((e = strsep(&s, " ")) != NULL) {
