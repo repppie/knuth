@@ -50,6 +50,7 @@ int nr_spacer;
 int nr_items;
 int nr_colors;
 int last_primary;
+int max_mem;
 int cutoff;
 int sol;
 int prog;
@@ -324,9 +325,11 @@ choose(void)
 
 	min_at = items[0].next;
 	min = mem[min_at].len;
-	deg = INT_MAX;
+	deg = 2 * max_mem; /* Infinity */
 	for (i = items[0].next; i != 0; i = items[i].next) {
-		d = min + 1 - max(items[min_at].bound - items[min_at].slack, 0);
+		d = mem[i].len + 1 - max(items[i].bound - items[i].slack, 0);
+		if (*items[i].name == '#') /* Prefer non-sharp */
+			d += max_mem;
 #if 1
 		if (mem[i].len <= items[i].bound && items[i].slack >=
 		    items[i].bound)
@@ -631,6 +634,7 @@ main(int argc, char **argv)
 	items[0].next = 1;
 	items[0].prev = last_primary - 1;
 
+	max_mem = 1;
 	spacer = add_spacer(NULL);
 	do {
 		s = m;
@@ -650,8 +654,10 @@ main(int argc, char **argv)
 			}
 			it = find_or_add_item(e);
 			add_item_for_option(&mem[it], c);
+			max_mem++;
 		}
 		spacer = add_spacer(spacer);
+		max_mem++;
 	} while (m < end);
 
 	dlx();
