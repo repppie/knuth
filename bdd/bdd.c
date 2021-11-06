@@ -18,15 +18,16 @@ struct template {
 };
 
 #define MAX_V 1000
-#define	MEMSIZE (1 << 29)
+#define	MEMSIZE ((4U << 30)-1)
 #define	MAX_STACK 1000
 
-char mem[MEMSIZE];
+char *mem;
 int op;
-int f0, g0;
+unsigned int f0, g0;
 int v_max;
-int hbase, ntop, tbot;
-int lcount[MAX_V], llist[MAX_V], hlist[MAX_V], lstart[MAX_V];
+unsigned int hbase, ntop, tbot;
+unsigned int lcount[MAX_V], llist[MAX_V], hlist[MAX_V], lstart[MAX_V];
+int stack[MAX_STACK];
 
 #define NODE(x) ((struct node *)&mem[(x) * sizeof(struct node)])
 #define TPLT(x) ((struct template *)&mem[(x) * sizeof(struct template)])
@@ -65,7 +66,7 @@ log2_ceil(unsigned int n)
  * Otherwise returns the level of the meld.
  */
 static int
-find_level(int f, int g)
+find_level(unsigned int f, unsigned int g)
 {
 	int t;
 
@@ -278,8 +279,8 @@ reduce:
 				NODE(q)->lo = ~TPLT(TPLT(s)->l)->left;
 				NODE(q)->hi = ~TPLT(TPLT(s)->h)->left;
 				NODE(q)->v = l;
-				printf("N %d v %d l %d h %d\n", q - f0,
-				    NODE(q)->v, NODE(q)->lo, NODE(q)->hi);
+				//printf("N %d v %d l %d h %d\n", q - f0,
+				    //NODE(q)->v, NODE(q)->lo, NODE(q)->hi);
 				s = r;
 			}
 		}
@@ -296,6 +297,21 @@ reduce:
 }
 
 static void
+update_v_max(int l, int v)
+{
+	int i;
+
+	/* Update all 0 1 nodes' v field if v_max changes */
+	if (v > v_max) {
+		v_max = v;
+		for (i = 0; i < l; i++) {
+			NODE(stack[i])->v = v_max + 1;
+			NODE(stack[i] + 1)->v = v_max + 1;
+		}
+	}
+}
+
+static void
 set_node(int i, int v, int lo, int hi)
 {
 	NODE(i)->v = v;
@@ -303,37 +319,30 @@ set_node(int i, int v, int lo, int hi)
 	NODE(i)->hi = hi;
 }
 
+static int
+read_num(int *dot)
+{
+	char buf[256] = { };
+	int c, i;
+
+	i = 0;
+	while ((c = getchar()) != ' ' && c != '\n' && c != '.') {
+		if (c < '0' || c > '9')
+			errx(1, "expected number");
+		buf[i++] = c;
+	}
+	if (dot && c == '.')
+		*dot = 1;
+	return (atoi(buf));
+}
+
 int
 main(void)
 {
 	char buf[512];
-	int c, i, j, l, stack[MAX_STACK];
+	int c, i, l;
 
-#if 0
-	v_max = 4;
-
-	/* 7.1.4-(41) */
-	f0 = 4;
-	init(f0 + 5, 1, 4, 3);
-	init(f0 + 4, 2, 0, 3);
-	init(f0 + 3, 3, 2, 1);
-	init(f0 + 2, 4, 0, 1);
-	init(f0 + 1, v_max + 1, 1, 1);
-	init(f0 + 0, v_max + 1, 0, 0);
-
-	g0 = f0 + 6;
-	init(g0 + 7, 1, 5, 6);
-	init(g0 + 6, 2, 1, 4);
-	init(g0 + 5, 2, 4, 1);
-	init(g0 + 4, 3, 2, 3);
-	init(g0 + 3, 4, 1, 0);
-	init(g0 + 2, 4, 0, 1);
-	init(g0 + 1, v_max + 1, 1, 1);
-	init(g0 + 0, v_max + 1, 0, 0);
-
-	ntop = g0 + 8;
-	op = 1;
-#endif
+	mem = malloc(MEMSIZE);
 
 	TPLT(0)->left = ~0;
 	TPLT(0)->right = 0;
@@ -351,20 +360,15 @@ main(void)
 		}
 		buf[i] = '\0';
 		i = 0;
+		if (buf[0] == '\0')
+			continue;
 		if (buf[0] == '~' || (buf[0] >= '1' && buf[0] <= '9')) {
 			int v;
 
 			if (buf[0] == '~')
 				i = 1;
 			v = atoi(buf + i);
-			/* Update all 0 1 nodes' v field if v_max changes */
-			if (v > v_max) {
-				v_max = v;
-				for (j = 0; j < l; j++) {
-					NODE(stack[j])->v = v_max + 1;
-					NODE(stack[j] + 1)->v = v_max + 1;
-				}
-			}
+			update_v_max(l, v);
 			set_node(ntop, v_max + 1, 0, 0);
 			set_node(ntop + 1, v_max + 1, 1, 1);
 			if (i == 0)
@@ -372,12 +376,75 @@ main(void)
 			else
 				set_node(ntop + 2, v, 1, 0);
 			stack[l++] = ntop;
-			printf("adding v %s%d @ %d %d\n", i == 0 ? "" : "~", v,
-			    ntop, v_max);
+			//printf("adding v %s%d @ %d %d\n", i == 0 ? "" : "~",
+			    //v, ntop, v_max);
 			ntop += 3;
 			i = 0;
 			continue;
-		} else if (buf[0] == 'c') {
+		} else if (strcmp(buf, "p") == 0) {
+			if (l == 0)
+				errx(1, "stack underflow");
+			for (i = ntop-1; i >= stack[l-1] + 2; i--)
+				printf("%d: ~%d ? %d : %d\n", i - stack[l-1],
+				    NODE(i)->v, NODE(i)->lo, NODE(i)->hi);
+			printf("l %d ntop %d\n", l, ntop);
+			i = 0;
+			continue;
+		} else if (strcmp(buf, "dup") == 0) {
+			int s;
+
+			s = stack[l - 1];
+			stack[l++] = ntop;
+			for (; s < stack[l - 1]; s++)
+				memcpy(NODE(ntop++), NODE(s),
+				    sizeof(struct node));
+			continue;
+		} else if (strcmp(buf, "drop") == 0) {
+			if (l == 0)
+				errx(1, "stack underflow");
+			ntop = stack[--l];
+			continue;
+		} else if (strcmp(buf, "bdd") == 0) {
+			/* Keep reading nodes until number ending in '.' */
+			int hi, last, lo, max, v;
+
+			stack[l++] = ntop;
+			set_node(ntop++, v_max + 1, 0, 0);
+			set_node(ntop++, v_max + 1, 1, 1);
+			max = last = 0;
+			do {
+				v = read_num(NULL);
+				if (v > max)
+					max = v;
+				lo = read_num(NULL);
+				hi = read_num(&last);
+				set_node(ntop++, v, lo, hi);
+			} while(!last);
+			update_v_max(l, max);
+			//printf("read %d nodes ntop %d\n", ntop-stack[l-1],
+			    //ntop);
+			continue;
+		} else if (strncmp(buf, "chg", strlen("chg")) == 0) {
+			/* chg <level> <old_v> <new_v> */
+			/* XXX should only change if it doesn't change order */
+			int end, lvl, new, old;
+
+			lvl = read_num(NULL);
+			old = read_num(NULL);
+			new = read_num(NULL);
+			update_v_max(l, new);
+			if (lvl >= l)
+				errx(1, "invalid level %d", lvl);
+			if (lvl == 0)
+				end = ntop;
+			else
+				end = stack[l - lvl];
+			for (i = stack[l-lvl-1]+2; i < end; i++)
+				if (NODE(i)->v == old)
+					NODE(i)->v = new;
+			i = 0;
+			continue;
+		} else if (buf[0] == 'c') { /* count */
 			unsigned long *c;
 			int n, start;
 
@@ -402,6 +469,7 @@ main(void)
 			printf("nodes %d count %lu\n", ntop - stack[l-1] - 2,
 			   c[ntop - start - 1]);
 			free(c);
+			i = 0;
 			continue;
 		} else if (buf[0] == '&')
 			op = 1;
@@ -410,18 +478,18 @@ main(void)
 		else if (buf[0] == '|')
 			op = 7;
 		else
-			errx(1, "unknown op %s\n", buf);
+			errx(1, "unknown op %s", buf);
 
 		if (l < 2)
 			errx(1, "stack underflow");
 		g0 = stack[l - 1];
 		f0 = stack[l - 2];
-		printf("synth l %d f0 %d g0 %d ntop %d op %d\n", l, f0, g0,
-		    ntop, op);
+		//printf("synth l %d f0 %d g0 %d ntop %d op %d\n", l, f0, g0,
+		    //ntop, op);
 		l--;
 		synth();
-		printf("ntop %d l %d cur %d nodes %d\n", ntop, l,
-		    stack[l - 1], l > 1 ? stack[l-1]-stack[l-2] : stack[l]-4);
+		//printf("ntop %d l %d cur %d nodes %d\n", ntop, l,
+		    //stack[l - 1], l > 1 ? stack[l-1]-stack[l-2] : stack[l]-4);
 	}
 
 	return (0);
