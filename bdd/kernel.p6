@@ -10,7 +10,7 @@ sub intersperse($e, @l) {
 	}
 }
 
-sub MAIN($f) {
+sub MAIN($f, :$independent?) {
 	my @v = read-graph($f);
 
 	my $c;
@@ -23,7 +23,7 @@ sub MAIN($f) {
 			@o.push: "{$a+1}";
 			say '&' unless $i++ == 0;
 		}
-		say "{~@o} {'| ' x (@o.elems-1)} &";
+		say "{~@o} {'| ' x (@o.elems-1)} &" without $independent;
 		say '&' unless $c++ == 0;
 	}
 
